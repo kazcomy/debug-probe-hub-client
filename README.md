@@ -6,7 +6,7 @@ This directory contains client tools for interacting with [debug-probe-hub](http
 
 debug-probe-hub allows you to:
 - Flash firmware to remote hardware via REST API
-- Debug remotely via GDB port forwarding over SSH
+- Debug remotely by connecting GDB directly over LAN
 - Share debug probes across multiple development machines
 - Avoid USB/IP forwarding complications
 
@@ -14,7 +14,7 @@ debug-probe-hub allows you to:
 
 - **client.py** - REST API client library
 - **flash.py** - CLI tool for flashing firmware
-- **gdb_tunnel.py** - SSH tunnel manager for remote debugging
+- **gdb_tunnel.py** - Debug session launcher (direct LAN endpoint output)
 - **requirements.txt** - Python dependencies
 
 ## Installation
@@ -35,9 +35,9 @@ Set the following environment variables (or use command-line arguments):
 # debug-probe-hub server URL (API endpoint)
 export DEBUG_PROBE_HUB_URL=http://192.168.1.100:8080
 
-# SSH access to the debug-probe-hub server
-export DEBUG_PROBE_HUB_SSH_HOST=192.168.1.100
-export DEBUG_PROBE_HUB_SSH_USER=pi
+# Optional GDB endpoint overrides
+export DEBUG_PROBE_HUB_GDB_HOST=192.168.1.100
+export DEBUG_PROBE_HUB_GDB_BASE=3330
 
 # Default target and probe (optional)
 export DEBUG_PROBE_HUB_TARGET=ch32v003
@@ -102,29 +102,28 @@ make flash-master-remote
 
 ### 3. Debug with GDB
 
-The `gdb_tunnel.py` script establishes an SSH tunnel and starts a debug session:
+The `gdb_tunnel.py` script starts a debug session and prints the direct GDB endpoint:
 
 ```bash
-# Start GDB tunnel (keeps running until Ctrl+C)
+# Start debug server and print endpoint
 ./tool/debug-probe-hub-client/gdb_tunnel.py \
-  --ssh-host 192.168.1.100 \
+  --server http://192.168.1.100:8080 \
   --target stm32g4 \
   --probe 1 \
-  --transport swd \
-  --local-port 3333
+  --transport swd
 ```
 
 This will:
 1. Call the debug-probe-hub API to start a debug session
-2. Establish an SSH tunnel forwarding `localhost:3333` to the remote GDB server
-3. Wait until interrupted (Ctrl+C)
+2. Resolve the direct endpoint (`<hub-host>:<gdb_base + probe_id>`)
+3. Print connection target for GDB
 
 **Connect GDB:**
 
 ```bash
 # In another terminal
 riscv-wch-elf-gdb build/gfx_slave.elf
-(gdb) target remote localhost:3333
+(gdb) target remote 192.168.1.100:3331
 (gdb) monitor reset halt
 (gdb) load
 (gdb) continue
@@ -136,15 +135,15 @@ Use the VSCode debug configurations:
 - "Debug Slave (Debug-Probe-Hub)"
 - "Debug Master (Debug-Probe-Hub)"
 
-These automatically start the SSH tunnel via VSCode tasks.
+These should call `gdb_tunnel.py` before launching GDB, then connect directly to the printed endpoint.
 
 ## Environment Variables Reference
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DEBUG_PROBE_HUB_URL` | `http://remoteprogrammer.local.lan:8080` | API endpoint URL |
-| `DEBUG_PROBE_HUB_SSH_HOST` | *(required)* | SSH hostname or IP |
-| `DEBUG_PROBE_HUB_SSH_USER` | Current user | SSH username |
+| `DEBUG_PROBE_HUB_GDB_HOST` | *(derived from URL host)* | Optional GDB endpoint host override |
+| `DEBUG_PROBE_HUB_GDB_BASE` | `3330` | Base GDB port for `probe_id -> port` calculation |
 | `DEBUG_PROBE_HUB_TARGET` | `ch32v003` | Default target device |
 | `DEBUG_PROBE_HUB_PROBE` | *(none)* | Default probe ID |
 | `DEBUG_PROBE_HUB_TRANSPORT` | *(none)* | Optional transport (for example: `swd`, `jtag`) |
@@ -203,16 +202,16 @@ Error: Cannot connect to debug-probe-hub server
 - Check network connectivity: `curl http://192.168.1.100:8080/status`
 - Ensure debug-probe-hub server is running
 
-### SSH Tunnel Fails
+### GDB Endpoint Unreachable
 
 ```
-Error: SSH tunnel failed to start
+Error: GDB endpoint is not reachable yet
 ```
 
 **Solutions:**
-- Verify SSH access: `ssh user@host`
-- Check `DEBUG_PROBE_HUB_SSH_HOST` and `DEBUG_PROBE_HUB_SSH_USER`
-- Ensure SSH key authentication is set up (no password prompt)
+- Check probe session start log from `gdb_tunnel.py`
+- Verify hub-side firewall allows your client CIDR to GDB port
+- Verify connectivity to hub: `nc -vz 192.168.1.100 3331`
 
 ### Probe Busy
 
