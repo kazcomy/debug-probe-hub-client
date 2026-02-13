@@ -17,6 +17,7 @@ Environment variables:
 """
 
 import argparse
+import json
 import os
 import socket
 import sys
@@ -32,6 +33,35 @@ except ImportError:
     from client import DebugProbeHubClient
 
 import requests
+
+
+def format_http_error(error: requests.HTTPError) -> str:
+    """Build a helpful message from HTTP error and response payload."""
+    response = error.response
+    if response is None:
+        return str(error)
+
+    details = []
+    body_text = (response.text or "").strip()
+    if body_text:
+        try:
+            payload = response.json()
+            if isinstance(payload, dict):
+                error_msg = payload.get("error")
+                log_msg = payload.get("log")
+                if error_msg:
+                    details.append(str(error_msg).strip())
+                if log_msg:
+                    details.append(str(log_msg).strip())
+        except (ValueError, json.JSONDecodeError):
+            pass
+
+        if not details:
+            details.append(body_text)
+
+    if details:
+        return f"{error} | {' | '.join(details)}"
+    return str(error)
 
 
 def resolve_gdb_host(server_url: str, explicit_host: Optional[str]) -> str:
@@ -100,6 +130,10 @@ def start_debug_session(
         print("Error: Cannot connect to debug-probe-hub API", file=sys.stderr)
         print(f"  URL: {server_url}", file=sys.stderr)
         print(f"  Details: {e}", file=sys.stderr)
+        return False
+    except requests.HTTPError as e:
+        print("Error: debug-probe-hub rejected debug session request", file=sys.stderr)
+        print(f"  Details: {format_http_error(e)}", file=sys.stderr)
         return False
     except Exception as e:
         print(f"Error starting debug session: {e}", file=sys.stderr)
