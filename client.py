@@ -200,6 +200,31 @@ class DebugProbeHubClient:
         response.raise_for_status()
         return response.json()
 
+    def stop_session(self, probe_id: int, kind: str = "all") -> Dict[str, Any]:
+        """Stop active session(s) for a probe and force lock release.
+
+        Args:
+            probe_id: Probe ID to stop session for
+            kind: Session kind to stop: "debug", "print", or "all" (default)
+
+        Returns:
+            Response dictionary with 'status' and 'log' keys
+
+        Raises:
+            ValueError: If kind is invalid
+            requests.RequestException: On connection or HTTP errors
+        """
+        normalized_kind = (kind or "all").strip().lower()
+        if normalized_kind not in {"debug", "print", "all"}:
+            raise ValueError("kind must be one of: debug, print, all")
+
+        data = {"probe": str(probe_id), "kind": normalized_kind}
+        response = self.session.post(
+            self._url("/session/stop"), data=data, timeout=self.timeout
+        )
+        response.raise_for_status()
+        return response.json()
+
     def get_gdb_port(self, probe_id: int, base_port: int = 3330) -> int:
         """Calculate GDB port for a probe.
 
@@ -244,6 +269,16 @@ def main():
     # status command
     subparsers.add_parser("status", help="Get hub status")
 
+    # stop-session command
+    stop_parser = subparsers.add_parser("stop-session", help="Stop active session and release probe lock")
+    stop_parser.add_argument("--probe", type=int, required=True, help="Probe ID")
+    stop_parser.add_argument(
+        "--kind",
+        choices=["debug", "print", "all"],
+        default="all",
+        help="Session kind to stop (default: all)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -267,6 +302,8 @@ def main():
             result = client.list_targets()
         elif args.command == "status":
             result = client.get_status()
+        elif args.command == "stop-session":
+            result = client.stop_session(probe_id=args.probe, kind=args.kind)
         else:
             print(f"Unknown command: {args.command}", file=sys.stderr)
             return 1
@@ -276,6 +313,13 @@ def main():
 
     except requests.RequestException as e:
         print(f"Error: {e}", file=sys.stderr)
+        response = getattr(e, "response", None)
+        if response is not None:
+            try:
+                print(json.dumps(response.json(), indent=2), file=sys.stderr)
+            except Exception:
+                if response.text:
+                    print(response.text, file=sys.stderr)
         return 1
     except Exception as e:
         print(f"Unexpected error: {e}", file=sys.stderr)

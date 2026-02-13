@@ -238,6 +238,10 @@ Examples:
     print("Debug session ready", file=sys.stderr)
     print(f"  GDB endpoint: {endpoint}", file=sys.stderr)
     print("  Example: (gdb) target remote " + endpoint, file=sys.stderr)
+    print(
+        f"  Recovery: python3 client.py --server {args.server} stop-session --probe {args.probe} --kind all",
+        file=sys.stderr,
+    )
     print(endpoint)
     return 0
 

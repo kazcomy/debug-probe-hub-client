@@ -118,6 +118,12 @@ This will:
 2. Resolve the direct endpoint (`<hub-host>:<gdb_base + probe_id>`)
 3. Print connection target for GDB
 
+If the session gets stuck or probe remains busy, force-stop it:
+
+```bash
+./tool/debug-probe-hub-client/client.py stop-session --probe 1 --kind all
+```
+
 **Connect GDB:**
 
 ```bash
@@ -172,6 +178,9 @@ result = client.flash_firmware(
 
 if result["status"] == "ok":
     print("Flash successful!")
+
+# Force-release a probe lock when needed
+client.stop_session(probe_id=1, kind="all")
 ```
 
 ## Submodule Usage
@@ -210,7 +219,6 @@ Error: GDB endpoint is not reachable yet
 
 **Solutions:**
 - Check probe session start log from `gdb_tunnel.py`
-- Verify hub-side firewall allows your client CIDR to GDB port
 - Verify connectivity to hub: `nc -vz 192.168.1.100 3331`
 
 ### Probe Busy
@@ -223,6 +231,8 @@ Error: Probe #4 is busy
 - Another user/session is using the probe
 - Wait for the other session to finish
 - Use a different probe: `--probe 5`
+- Force release the probe session:
+  `./tool/debug-probe-hub-client/client.py stop-session --probe 4 --kind all`
 
 ### Auto-detection Fails
 
