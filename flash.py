@@ -5,13 +5,14 @@ This script uploads firmware to a target device using debug-probe-hub's REST API
 It automatically searches for compatible probes if not specified.
 
 Usage:
-    ./flash.py --target ch32v003 --probe 4 --firmware build/gfx_slave.bin
+    ./flash.py --target stm32g4 --probe 1 --transport swd --firmware build/gfx_slave.bin
     ./flash.py --firmware build/gfx_slave.hex  # Auto-detect probe
 
 Environment variables:
     DEBUG_PROBE_HUB_URL: Server URL (default: http://remoteprogrammer.local.lan:8080)
     DEBUG_PROBE_HUB_TARGET: Default target name (default: ch32v003)
     DEBUG_PROBE_HUB_PROBE: Default probe ID
+    DEBUG_PROBE_HUB_TRANSPORT: Optional transport (e.g., swd, jtag)
 """
 
 import sys
@@ -76,6 +77,7 @@ def flash_firmware(
     target: str,
     probe_id: Optional[int],
     firmware_path: str,
+    transport: Optional[str] = None,
     verbose: bool = False,
 ) -> int:
     """Flash firmware to target device.
@@ -85,6 +87,7 @@ def flash_firmware(
         target: Target device name
         probe_id: Probe ID (None for auto-detect)
         firmware_path: Path to firmware file
+        transport: Optional transport selection
         verbose: Enable verbose output
 
     Returns:
@@ -114,12 +117,19 @@ def flash_firmware(
         print(f"Server:   {client.base_url}", file=sys.stderr)
         print(f"Target:   {target}", file=sys.stderr)
         print(f"Probe ID: {probe_id}", file=sys.stderr)
+        if transport:
+            print(f"Transport: {transport}", file=sys.stderr)
         print(f"Firmware: {firmware_file.absolute()}", file=sys.stderr)
         print("", file=sys.stderr)
 
         # Flash firmware
         print("Flashing firmware...", file=sys.stderr)
-        result = client.flash_firmware(target, probe_id, str(firmware_file))
+        result = client.flash_firmware(
+            target=target,
+            probe_id=probe_id,
+            firmware_path=str(firmware_file),
+            transport=transport,
+        )
 
         # Display result
         if result.get("status") == "ok":
@@ -164,10 +174,11 @@ Environment variables:
   DEBUG_PROBE_HUB_URL     Server URL (default: http://remoteprogrammer.local.lan:8080)
   DEBUG_PROBE_HUB_TARGET  Default target name (default: ch32v003)
   DEBUG_PROBE_HUB_PROBE   Default probe ID
+  DEBUG_PROBE_HUB_TRANSPORT Optional transport (e.g., swd, jtag)
 
 Examples:
   # Flash with specific probe
-  %(prog)s --target ch32v003 --probe 4 --firmware build/gfx_slave.bin
+  %(prog)s --target stm32g4 --probe 1 --transport swd --firmware build/gfx_slave.bin
 
   # Auto-detect probe
   %(prog)s --firmware build/gfx_slave.hex
@@ -195,6 +206,11 @@ Examples:
         help="Probe ID (default: auto-detect or $DEBUG_PROBE_HUB_PROBE)",
     )
     parser.add_argument(
+        "--transport",
+        default=os.environ.get("DEBUG_PROBE_HUB_TRANSPORT"),
+        help="Transport selection (optional, e.g., swd, jtag)",
+    )
+    parser.add_argument(
         "--firmware", required=True, help="Firmware file path (.bin, .hex, or .elf)"
     )
     parser.add_argument(
@@ -208,6 +224,7 @@ Examples:
         target=args.target,
         probe_id=args.probe,
         firmware_path=args.firmware,
+        transport=args.transport,
         verbose=args.verbose,
     )
 

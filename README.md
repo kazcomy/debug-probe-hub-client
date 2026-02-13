@@ -42,6 +42,7 @@ export DEBUG_PROBE_HUB_SSH_USER=pi
 # Default target and probe (optional)
 export DEBUG_PROBE_HUB_TARGET=ch32v003
 export DEBUG_PROBE_HUB_PROBE=4
+export DEBUG_PROBE_HUB_TRANSPORT=swd
 ```
 
 Alternatively, create a `.env` file in the project root (see `.env.example`).
@@ -66,8 +67,9 @@ Alternatively, create a `.env` file in the project root (see `.env.example`).
 ```bash
 # Flash with specific probe (recommended)
 ./tool/debug-probe-hub-client/flash.py \
-  --target ch32v003 \
-  --probe 4 \
+  --target stm32g4 \
+  --probe 1 \
+  --transport swd \
   --firmware build/gfx_slave.bin
 
 # Auto-detect compatible probe (requires server connection)
@@ -106,7 +108,9 @@ The `gdb_tunnel.py` script establishes an SSH tunnel and starts a debug session:
 # Start GDB tunnel (keeps running until Ctrl+C)
 ./tool/debug-probe-hub-client/gdb_tunnel.py \
   --ssh-host 192.168.1.100 \
-  --probe 4 \
+  --target stm32g4 \
+  --probe 1 \
+  --transport swd \
   --local-port 3333
 ```
 
@@ -143,6 +147,7 @@ These automatically start the SSH tunnel via VSCode tasks.
 | `DEBUG_PROBE_HUB_SSH_USER` | Current user | SSH username |
 | `DEBUG_PROBE_HUB_TARGET` | `ch32v003` | Default target device |
 | `DEBUG_PROBE_HUB_PROBE` | *(none)* | Default probe ID |
+| `DEBUG_PROBE_HUB_TRANSPORT` | *(none)* | Optional transport (for example: `swd`, `jtag`) |
 
 ## API Client Library
 
@@ -160,9 +165,10 @@ print(f"Found {len(probes)} probes")
 
 # Flash firmware
 result = client.flash_firmware(
-    target="ch32v003",
-    probe_id=4,
-    firmware_path="build/gfx_slave.bin"
+    target="stm32g4",
+    probe_id=1,
+    firmware_path="build/gfx_slave.bin",
+    transport="swd",
 )
 
 if result["status"] == "ok":

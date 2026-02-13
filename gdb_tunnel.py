@@ -5,7 +5,7 @@ This script establishes an SSH tunnel to the debug-probe-hub server, starts a de
 session, and forwards the GDB port to localhost for use with VSCode or other GDB clients.
 
 Usage:
-    ./gdb_tunnel.py --target ch32v003 --probe 4 --local-port 3333
+    ./gdb_tunnel.py --target stm32g4 --probe 1 --transport swd --local-port 3333
 
 Environment variables:
     DEBUG_PROBE_HUB_URL       API URL (default: http://remoteprogrammer.local.lan:8080)
@@ -13,6 +13,7 @@ Environment variables:
     DEBUG_PROBE_HUB_SSH_USER  SSH username (default: current user)
     DEBUG_PROBE_HUB_TARGET    Default target name (default: ch32v003)
     DEBUG_PROBE_HUB_PROBE     Default probe ID
+    DEBUG_PROBE_HUB_TRANSPORT Optional transport (e.g., swd, jtag)
 """
 
 import sys
@@ -36,7 +37,11 @@ import requests
 
 
 def start_debug_session(
-    server_url: str, target: str, probe_id: int, verbose: bool = False
+    server_url: str,
+    target: str,
+    probe_id: int,
+    transport: Optional[str] = None,
+    verbose: bool = False,
 ) -> int:
     """Start debug session via API.
 
@@ -44,6 +49,7 @@ def start_debug_session(
         server_url: debug-probe-hub API URL
         target: Target device name
         probe_id: Probe ID
+        transport: Optional transport selection
         verbose: Enable verbose output
 
     Returns:
@@ -55,8 +61,14 @@ def start_debug_session(
         print(f"Starting debug session...", file=sys.stderr)
         print(f"  Target:   {target}", file=sys.stderr)
         print(f"  Probe ID: {probe_id}", file=sys.stderr)
+        if transport:
+            print(f"  Transport: {transport}", file=sys.stderr)
 
-        result = client.start_debug_session(target, probe_id)
+        result = client.start_debug_session(
+            target=target,
+            probe_id=probe_id,
+            transport=transport,
+        )
 
         if result.get("status") == "ok":
             # Calculate GDB port
@@ -183,10 +195,11 @@ Environment variables:
   DEBUG_PROBE_HUB_SSH_USER  SSH username (default: current user)
   DEBUG_PROBE_HUB_TARGET    Default target name (default: ch32v003)
   DEBUG_PROBE_HUB_PROBE     Default probe ID
+  DEBUG_PROBE_HUB_TRANSPORT Optional transport (e.g., swd, jtag)
 
 Examples:
   # Basic usage
-  %(prog)s --ssh-host 192.168.1.100 --probe 4
+  %(prog)s --ssh-host 192.168.1.100 --target stm32g4 --probe 1 --transport swd
 
   # Use environment variables
   export DEBUG_PROBE_HUB_SSH_HOST=192.168.1.100
@@ -194,7 +207,7 @@ Examples:
   %(prog)s
 
   # Custom local port
-  %(prog)s --ssh-host pi.local --probe 4 --local-port 3334
+  %(prog)s --ssh-host pi.local --target stm32g4 --probe 1 --transport swd --local-port 3334
         """,
     )
 
@@ -225,6 +238,11 @@ Examples:
         help="Probe ID (required, or set $DEBUG_PROBE_HUB_PROBE)",
     )
     parser.add_argument(
+        "--transport",
+        default=os.environ.get("DEBUG_PROBE_HUB_TRANSPORT"),
+        help="Transport selection (optional, e.g., swd, jtag)",
+    )
+    parser.add_argument(
         "--local-port",
         type=int,
         default=3333,
@@ -247,7 +265,7 @@ Examples:
 
     # Start debug session
     remote_gdb_port = start_debug_session(
-        args.server, args.target, args.probe, args.verbose
+        args.server, args.target, args.probe, args.transport, args.verbose
     )
 
     if remote_gdb_port == 0:

@@ -93,7 +93,10 @@ class DebugProbeHubClient:
         """
         response = self.session.get(self._url("/probes"), timeout=self.timeout)
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
+        if isinstance(payload, dict) and "probes" in payload:
+            return payload["probes"]
+        return payload
 
     def list_targets(self) -> List[Dict[str, Any]]:
         """List all supported target devices.
@@ -106,7 +109,16 @@ class DebugProbeHubClient:
         """
         response = self.session.get(self._url("/targets"), timeout=self.timeout)
         response.raise_for_status()
-        return response.json()
+        payload = response.json()
+
+        # Handle API response format: {"targets": {"name": {...}}}
+        if isinstance(payload, dict) and "targets" in payload:
+            targets = payload["targets"]
+            if isinstance(targets, dict):
+                return [{"name": name, **(cfg or {})} for name, cfg in targets.items()]
+            if isinstance(targets, list):
+                return targets
+        return payload
 
     def get_status(self) -> Dict[str, Any]:
         """Get probe hub status.
@@ -122,7 +134,11 @@ class DebugProbeHubClient:
         return response.json()
 
     def flash_firmware(
-        self, target: str, probe_id: int, firmware_path: str
+        self,
+        target: str,
+        probe_id: int,
+        firmware_path: str,
+        transport: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Flash firmware to target device.
 
@@ -130,6 +146,7 @@ class DebugProbeHubClient:
             target: Target device name (e.g., 'ch32v003')
             probe_id: Probe ID to use
             firmware_path: Path to firmware binary file
+            transport: Optional transport selection (e.g., 'swd', 'jtag')
 
         Returns:
             Response dictionary with 'status' and 'log' keys
@@ -145,6 +162,8 @@ class DebugProbeHubClient:
         with open(firmware_file, "rb") as f:
             files = {"file": (firmware_file.name, f, "application/octet-stream")}
             data = {"target": target, "probe": str(probe_id), "mode": "flash"}
+            if transport:
+                data["transport"] = transport
 
             response = self.session.post(
                 self._url("/dispatch"), data=data, files=files, timeout=self.timeout
@@ -153,13 +172,17 @@ class DebugProbeHubClient:
             return response.json()
 
     def start_debug_session(
-        self, target: str, probe_id: int
+        self,
+        target: str,
+        probe_id: int,
+        transport: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Start a debug session (launches GDB server).
 
         Args:
             target: Target device name (e.g., 'ch32v003')
             probe_id: Probe ID to use
+            transport: Optional transport selection (e.g., 'swd', 'jtag')
 
         Returns:
             Response dictionary with 'status' and 'log' keys
@@ -168,6 +191,8 @@ class DebugProbeHubClient:
             requests.RequestException: On connection or HTTP errors
         """
         data = {"target": target, "probe": str(probe_id), "mode": "debug"}
+        if transport:
+            data["transport"] = transport
 
         response = self.session.post(
             self._url("/dispatch"), data=data, timeout=self.timeout
