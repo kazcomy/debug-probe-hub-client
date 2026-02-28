@@ -7,6 +7,7 @@ This directory contains client tools for interacting with [debug-probe-hub](http
 debug-probe-hub allows you to:
 - Flash firmware to remote hardware via REST API
 - Debug remotely by connecting GDB directly over LAN
+- Start print sessions (UART/RTT) via REST API
 - Share debug probes across multiple development machines
 - Avoid USB/IP forwarding complications
 
@@ -43,6 +44,8 @@ export DEBUG_PROBE_HUB_GDB_BASE=3330
 export DEBUG_PROBE_HUB_TARGET=ch32v003
 export DEBUG_PROBE_HUB_PROBE=4
 export DEBUG_PROBE_HUB_TRANSPORT=swd
+export DEBUG_PROBE_HUB_PREFERRED_INTERFACE=wch-link
+export DEBUG_PROBE_HUB_DEBUG_INTERFACE=jlink
 ```
 
 Alternatively, create a `.env` file in the project root (see `.env.example`).
@@ -113,6 +116,15 @@ The `gdb_tunnel.py` script starts a debug session and prints the direct GDB endp
   --transport swd
 ```
 
+Probe can also be auto-selected by target/mode compatibility:
+
+```bash
+./tool/debug-probe-hub-client/gdb_tunnel.py \
+  --server http://192.168.1.100:8080 \
+  --target stm32g4 \
+  --preferred-interface jlink
+```
+
 This will:
 1. Call the debug-probe-hub API to start a debug session
 2. Resolve the direct endpoint (`<hub-host>:<gdb_base + probe_id>`)
@@ -123,6 +135,29 @@ If the session gets stuck or probe remains busy, force-stop it:
 ```bash
 ./tool/debug-probe-hub-client/client.py stop-session --probe 1 --kind all
 ```
+
+### 4. Start UART/Print Session
+
+Use the client command to start a print session on a dedicated probe:
+
+```bash
+./tool/debug-probe-hub-client/client.py \
+  --server http://192.168.1.100:8080 \
+  start-print \
+  --target stm32g4 \
+  --probe 10 \
+  --baud 115200
+```
+
+Then connect to print TCP endpoint (`rtt_base + probe_id`, usually `9090 + probe_id`):
+
+```bash
+nc 192.168.1.100 9100
+```
+
+This lets you split probes:
+- debug: `--probe 1` (J-Link)
+- print: `--probe 10` (USB-UART)
 
 **Connect GDB:**
 
@@ -153,6 +188,8 @@ These should call `gdb_tunnel.py` before launching GDB, then connect directly to
 | `DEBUG_PROBE_HUB_TARGET` | `ch32v003` | Default target device |
 | `DEBUG_PROBE_HUB_PROBE` | *(none)* | Default probe ID |
 | `DEBUG_PROBE_HUB_TRANSPORT` | *(none)* | Optional transport (for example: `swd`, `jtag`) |
+| `DEBUG_PROBE_HUB_PREFERRED_INTERFACE` | *(none)* | Preferred interface for flash auto probe selection |
+| `DEBUG_PROBE_HUB_DEBUG_INTERFACE` | *(none)* | Preferred interface for debug auto probe selection |
 
 ## API Client Library
 
@@ -178,6 +215,9 @@ result = client.flash_firmware(
 
 if result["status"] == "ok":
     print("Flash successful!")
+
+# Start print session (UART/RTT)
+client.start_print_session(target="stm32g4", probe_id=10, baud=115200)
 
 # Force-release a probe lock when needed
 client.stop_session(probe_id=1, kind="all")

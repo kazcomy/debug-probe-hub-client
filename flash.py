@@ -13,6 +13,7 @@ Environment variables:
     DEBUG_PROBE_HUB_TARGET: Default target name (default: ch32v003)
     DEBUG_PROBE_HUB_PROBE: Default probe ID
     DEBUG_PROBE_HUB_TRANSPORT: Optional transport (e.g., swd, jtag)
+    DEBUG_PROBE_HUB_PREFERRED_INTERFACE: Optional interface hint for auto probe selection
 """
 
 import sys
@@ -33,7 +34,9 @@ import requests
 
 
 def find_compatible_probe(
-    client: DebugProbeHubClient, target: str, preferred_interface: str = "wch-link"
+    client: DebugProbeHubClient,
+    target: str,
+    preferred_interface: Optional[str] = None,
 ) -> Optional[int]:
     """Find a compatible probe for the target.
 
@@ -46,25 +49,11 @@ def find_compatible_probe(
         Probe ID if found, None otherwise
     """
     try:
-        # Try to find probes with preferred interface
-        probes = client.search_probes(interface=preferred_interface)
-        if probes:
-            return probes[0]["id"]
-
-        # Fall back to listing all probes
-        probes = client.list_probes()
-        if probes:
-            # Check target compatibility
-            targets = client.list_targets()
-            target_info = next((t for t in targets if t["name"] == target), None)
-            if target_info and "compatible_interfaces" in target_info:
-                compatible_interfaces = target_info["compatible_interfaces"]
-                for probe in probes:
-                    if probe.get("interface") in compatible_interfaces:
-                        return probe["id"]
-
-            # Return first available probe as last resort
-            return probes[0]["id"]
+        return client.find_compatible_probe(
+            target=target,
+            mode="flash",
+            preferred_interface=preferred_interface,
+        )
 
     except Exception as e:
         print(f"Warning: Failed to auto-detect probe: {e}", file=sys.stderr)
@@ -78,6 +67,7 @@ def flash_firmware(
     probe_id: Optional[int],
     firmware_path: str,
     transport: Optional[str] = None,
+    preferred_interface: Optional[str] = None,
     verbose: bool = False,
 ) -> int:
     """Flash firmware to target device.
@@ -88,6 +78,7 @@ def flash_firmware(
         probe_id: Probe ID (None for auto-detect)
         firmware_path: Path to firmware file
         transport: Optional transport selection
+        preferred_interface: Optional interface hint for auto probe selection
         verbose: Enable verbose output
 
     Returns:
@@ -104,7 +95,11 @@ def flash_firmware(
         # Auto-detect probe if not specified
         if probe_id is None:
             print("Searching for compatible probe...", file=sys.stderr)
-            probe_id = find_compatible_probe(client, target)
+            probe_id = find_compatible_probe(
+                client=client,
+                target=target,
+                preferred_interface=preferred_interface,
+            )
             if probe_id is None:
                 print(
                     "Error: No compatible probe found. Please specify --probe.",
@@ -119,6 +114,8 @@ def flash_firmware(
         print(f"Probe ID: {probe_id}", file=sys.stderr)
         if transport:
             print(f"Transport: {transport}", file=sys.stderr)
+        if preferred_interface:
+            print(f"Preferred interface: {preferred_interface}", file=sys.stderr)
         print(f"Firmware: {firmware_file.absolute()}", file=sys.stderr)
         print("", file=sys.stderr)
 
@@ -175,6 +172,7 @@ Environment variables:
   DEBUG_PROBE_HUB_TARGET  Default target name (default: ch32v003)
   DEBUG_PROBE_HUB_PROBE   Default probe ID
   DEBUG_PROBE_HUB_TRANSPORT Optional transport (e.g., swd, jtag)
+  DEBUG_PROBE_HUB_PREFERRED_INTERFACE Optional interface hint for auto probe selection
 
 Examples:
   # Flash with specific probe
@@ -211,6 +209,11 @@ Examples:
         help="Transport selection (optional, e.g., swd, jtag)",
     )
     parser.add_argument(
+        "--preferred-interface",
+        default=os.environ.get("DEBUG_PROBE_HUB_PREFERRED_INTERFACE"),
+        help="Preferred interface for auto probe selection (optional, e.g., jlink)",
+    )
+    parser.add_argument(
         "--firmware", required=True, help="Firmware file path (.bin, .hex, or .elf)"
     )
     parser.add_argument(
@@ -225,6 +228,7 @@ Examples:
         probe_id=args.probe,
         firmware_path=args.firmware,
         transport=args.transport,
+        preferred_interface=args.preferred_interface,
         verbose=args.verbose,
     )
 

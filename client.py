@@ -36,6 +36,23 @@ class DebugProbeHubClient:
         """Construct full URL from path."""
         return f"{self.base_url.rstrip('/')}/{path.lstrip('/')}"
 
+    @staticmethod
+    def _normalize_interface_list(value: Any) -> List[str]:
+        """Normalize compatible interface config into a deduplicated list."""
+        if isinstance(value, str):
+            value = [value]
+        if not isinstance(value, list):
+            return []
+
+        normalized: List[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                continue
+            interface = item.strip()
+            if interface and interface not in normalized:
+                normalized.append(interface)
+        return normalized
+
     def search_probes(
         self,
         interface: Optional[str] = None,
@@ -120,6 +137,64 @@ class DebugProbeHubClient:
                 return targets
         return payload
 
+    def get_target_info(self, target: str) -> Optional[Dict[str, Any]]:
+        """Get target metadata from /targets by target name."""
+        for target_info in self.list_targets():
+            if str(target_info.get("name")) == target:
+                return target_info
+        return None
+
+    def get_compatible_interfaces(self, target: str, mode: Optional[str] = None) -> List[str]:
+        """Get compatible interfaces for a target, optionally narrowed by mode."""
+        target_info = self.get_target_info(target)
+        if not target_info:
+            return []
+
+        if mode:
+            mode_key = mode.strip().lower()
+            mode_map = target_info.get("compatible_probes_by_mode")
+            if isinstance(mode_map, dict):
+                return self._normalize_interface_list(mode_map.get(mode_key, []))
+
+        # Backward-compatible fallback.
+        interfaces = target_info.get("compatible_interfaces")
+        if interfaces is None:
+            interfaces = target_info.get("compatible_probes", [])
+        return self._normalize_interface_list(interfaces)
+
+    def find_compatible_probe(
+        self,
+        target: str,
+        mode: str,
+        preferred_interface: Optional[str] = None,
+    ) -> Optional[int]:
+        """Find first compatible probe ID for target/mode, optionally preferring an interface."""
+        probes = self.list_probes()
+        if not probes:
+            return None
+
+        compatible_interfaces = self.get_compatible_interfaces(target=target, mode=mode)
+        preferred = preferred_interface.strip() if isinstance(preferred_interface, str) else None
+
+        if preferred and preferred in compatible_interfaces:
+            for probe in probes:
+                if probe.get("interface") == preferred:
+                    return probe.get("id")
+
+        for probe in probes:
+            if probe.get("interface") in compatible_interfaces:
+                return probe.get("id")
+
+        # If server didn't return compatibility metadata, preserve legacy behavior.
+        if not compatible_interfaces:
+            if preferred:
+                for probe in probes:
+                    if probe.get("interface") == preferred:
+                        return probe.get("id")
+            return probes[0].get("id")
+
+        return None
+
     def get_status(self) -> Dict[str, Any]:
         """Get probe hub status.
 
@@ -200,6 +275,23 @@ class DebugProbeHubClient:
         response.raise_for_status()
         return response.json()
 
+    def start_print_session(
+        self,
+        target: str,
+        probe_id: int,
+        baud: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Start a print (UART/RTT) session."""
+        data = {"target": target, "probe": str(probe_id), "mode": "print"}
+        if baud is not None:
+            data["baud"] = str(int(baud))
+
+        response = self.session.post(
+            self._url("/dispatch"), data=data, timeout=self.timeout
+        )
+        response.raise_for_status()
+        return response.json()
+
     def stop_session(self, probe_id: int, kind: str = "all") -> Dict[str, Any]:
         """Stop active session(s) for a probe and force lock release.
 
@@ -237,6 +329,10 @@ class DebugProbeHubClient:
         Returns:
             GDB port number
         """
+        return base_port + probe_id
+
+    def get_print_port(self, probe_id: int, base_port: int = 9090) -> int:
+        """Calculate print/UART TCP port for a probe."""
         return base_port + probe_id
 
 
@@ -279,6 +375,17 @@ def main():
         help="Session kind to stop (default: all)",
     )
 
+    # start-print command
+    print_parser = subparsers.add_parser("start-print", help="Start print session")
+    print_parser.add_argument("--target", required=True, help="Target name")
+    print_parser.add_argument("--probe", type=int, required=True, help="Probe ID")
+    print_parser.add_argument(
+        "--baud",
+        type=int,
+        default=None,
+        help="UART baud rate (optional; server default is 115200)",
+    )
+
     args = parser.parse_args()
 
     if not args.command:
@@ -302,6 +409,12 @@ def main():
             result = client.list_targets()
         elif args.command == "status":
             result = client.get_status()
+        elif args.command == "start-print":
+            result = client.start_print_session(
+                target=args.target,
+                probe_id=args.probe,
+                baud=args.baud,
+            )
         elif args.command == "stop-session":
             result = client.stop_session(probe_id=args.probe, kind=args.kind)
         else:
